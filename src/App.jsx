@@ -3,6 +3,7 @@ import * as exifr from "exifr";
 import {
   auth, loginWithGoogle, logoutUser, onAuthStateChanged, getIdTokenResult,
   getVisits, saveVisits, subscribePhotos, uploadPhoto, deletePhoto,
+  subscribeUserProfiles, getOrCreateUserProfile, updateHandle,
   subscribeCustomMonuments, addCustomMonument, updateCustomMonument, deleteCustomMonument
 } from "./firebase.js";
 
@@ -340,7 +341,7 @@ function useMapEngine(mapRef) {
 }
 
 /* === Photo Modal === */
-function PhotoModal({ mon, photos, onClose, onAdd, onDel, user }) {
+function PhotoModal({ mon, photos, onClose, onAdd, onDel, user, displayNameForPhoto }) {
   const [dist, setDist] = useState(null);
   const [gpsMsg, setGpsMsg] = useState("位置情報を取得中...");
   const [preview, setPreview] = useState(null);
@@ -448,7 +449,7 @@ function PhotoModal({ mon, photos, onClose, onAdd, onDel, user }) {
                     <img src={p.url} alt="" onClick={function () { setZoomedPhoto(p.url); }} style={{ width: "100%", maxHeight: 200, objectFit: "cover", display: "block", cursor: "zoom-in" }} />
                     <div style={{ padding: "8px 12px", display: "flex", justifyContent: "space-between" }}>
                       <div>
-                        <div style={{ fontSize: 11, color: "#60a5fa", marginBottom: 2 }}>{p.displayName}</div>
+                        <div style={{ fontSize: 11, color: "#60a5fa", marginBottom: 2 }}>{displayNameForPhoto(p)}</div>
                         {p.cmt && <div style={{ fontSize: 12, color: "#cbd5e1" }}>{p.cmt}</div>}
                         <div style={{ fontSize: 10, color: "#475569", marginTop: 2 }}>
                           {p.shotDate && <span>撮影 {p.shotDate} ・ </span>}投稿 {p.date} ・ {p.dist}m地点
@@ -490,7 +491,7 @@ function PhotoModal({ mon, photos, onClose, onAdd, onDel, user }) {
 }
 
 /* === [追加] What's New Panel === */
-function NewsPanel({ allPhotos, monsMap, onClose, onItemClick }) {
+function NewsPanel({ allPhotos, monsMap, onClose, onItemClick, displayNameForPhoto }) {
   var feed = allPhotos.filter(function (p) { return monsMap[p.monumentId]; });
 
   return (
@@ -537,7 +538,7 @@ function NewsPanel({ allPhotos, monsMap, onClose, onItemClick }) {
                     </div>
                   </div>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 4 }}>
-                    <div style={{ fontSize: 11, color: "#60a5fa" }}>{p.displayName || "ゲスト"}</div>
+                    <div style={{ fontSize: 11, color: "#60a5fa" }}>{displayNameForPhoto(p)}</div>
                     {p.dist && <div style={{ fontSize: 9, color: "#475569" }}>{p.dist}m地点から</div>}
                   </div>
                   {p.cmt && <div style={{ fontSize: 12, color: "#cbd5e1", marginTop: 4, lineHeight: 1.4 }}>{p.cmt}</div>}
@@ -551,6 +552,49 @@ function NewsPanel({ allPhotos, monsMap, onClose, onItemClick }) {
   );
 }
 
+function ProfileModal({ currentHandle, handleInput, setHandleInput, saving, errorText, onSave, onClose }) {
+  var IS = { width: "100%", padding: "9px 12px", background: "#0f172a", border: "1px solid #334155", borderRadius: 8, color: "#e2e8f0", fontSize: 13, fontFamily: "inherit", boxSizing: "border-box", outline: "none" };
+  var trimmed = String(handleInput || "").trim();
+  var canSave = trimmed.length >= 2 && trimmed.length <= 20 && trimmed !== currentHandle && !saving;
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.78)", zIndex: 2200, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }} onClick={onClose}>
+      <form
+        onSubmit={function (e) { e.preventDefault(); if (canSave) onSave(trimmed); }}
+        style={{ background: "#1e293b", border: "1px solid #334155", borderRadius: 14, padding: 16, width: "100%", maxWidth: 340 }}
+        onClick={function (e) { e.stopPropagation(); }}
+      >
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+          <div style={{ fontSize: 14, fontWeight: 700, color: "#f8fafc" }}>ハンドル名を変更</div>
+          <button type="button" onClick={onClose} disabled={saving} style={{ background: "none", border: "none", color: "#64748b", fontSize: 18, cursor: saving ? "not-allowed" : "pointer" }}>✕</button>
+        </div>
+        <div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 6 }}>画面上の投稿者名として表示されます</div>
+        <input
+          autoFocus
+          type="text"
+          maxLength={20}
+          value={handleInput}
+          onChange={function (e) { setHandleInput(e.target.value); }}
+          placeholder="2〜20文字"
+          disabled={saving}
+          style={IS}
+        />
+        <div style={{ display: "flex", justifyContent: "space-between", marginTop: 5, minHeight: 18 }}>
+          <div style={{ fontSize: 10, color: errorText ? "#fca5a5" : "#64748b" }}>{errorText || "他のユーザーと重複しない名前を入力してください"}</div>
+          <div style={{ fontSize: 10, color: "#64748b" }}>{trimmed.length}/20</div>
+        </div>
+        <button
+          type="submit"
+          disabled={!canSave}
+          style={{ width: "100%", marginTop: 12, padding: 10, background: canSave ? "linear-gradient(135deg,#f59e0b,#d97706)" : "#334155", color: canSave ? "#1e293b" : "#64748b", border: "none", borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: canSave ? "pointer" : "not-allowed", fontFamily: "inherit" }}
+        >
+          {saving ? "保存中..." : "保存する"}
+        </button>
+      </form>
+    </div>
+  );
+}
+
 /* === Main App === */
 export default function App() {
   var mapDivRef = useRef(null);
@@ -559,6 +603,12 @@ export default function App() {
   const [sel, setSel] = useState(null);
   const [user, setUser] = useState(null);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [currentHandle, setCurrentHandle] = useState("");
+  const [profiles, setProfiles] = useState({});
+  const [showProfile, setShowProfile] = useState(false);
+  const [handleInput, setHandleInput] = useState("");
+  const [handleError, setHandleError] = useState("");
+  const [handleSaving, setHandleSaving] = useState(false);
   const [authLoading, setAuthLoading] = useState(true);
   const [vis, setVis] = useState({});
   const [allPhotos, setAllPhotos] = useState([]);
@@ -592,6 +642,16 @@ export default function App() {
       if (u) {
         try { var visits = await getVisits(u.uid); setVis(visits); } catch { setVis({}); }
         try {
+          var profile = await getOrCreateUserProfile(u.uid, u.displayName);
+          var nextHandle = profile && profile.handle ? profile.handle : (u.displayName || "ゲスト");
+          setCurrentHandle(nextHandle);
+          setHandleInput(nextHandle);
+        } catch {
+          var fallbackHandle = u.displayName || "ゲスト";
+          setCurrentHandle(fallbackHandle);
+          setHandleInput(fallbackHandle);
+        }
+        try {
           var token = await getIdTokenResult(u, true);
           setIsAdmin(token.claims && token.claims.admin === true);
         } catch {
@@ -599,6 +659,8 @@ export default function App() {
         }
       } else {
         setVis({});
+        setCurrentHandle("");
+        setHandleInput("");
       }
       setAuthLoading(false);
     });
@@ -608,6 +670,17 @@ export default function App() {
   // 写真リアルタイム購読
   useEffect(function () {
     var unsub = subscribePhotos(setAllPhotos);
+    return unsub;
+  }, []);
+
+  useEffect(function () {
+    var unsub = subscribeUserProfiles(function (items) {
+      var next = {};
+      items.forEach(function (p) {
+        if (p.uid && p.handle) next[p.uid] = p;
+      });
+      setProfiles(next);
+    });
     return unsub;
   }, []);
 
@@ -644,7 +717,7 @@ export default function App() {
 
   async function addPhoto(mid, data, cmt, dist, shotDate) {
     if (!user) return;
-    await uploadPhoto(user.uid, mid, data, cmt, dist, user.displayName || "ゲスト", shotDate);
+    await uploadPhoto(user.uid, mid, data, cmt, dist, currentHandle || user.displayName || "ゲスト", shotDate);
     if (!vis[mid]) {
       var nv = Object.assign({}, vis, { [mid]: true });
       setVis(nv);
@@ -663,6 +736,35 @@ export default function App() {
       lat: parseFloat(form.la), lng: parseFloat(form.ln)
     });
     setForm({ n: "", l: "", la: "", ln: "" });
+  }
+
+  function displayNameForPhoto(p) {
+    if (p && p.userId && profiles[p.userId] && profiles[p.userId].handle) {
+      return profiles[p.userId].handle;
+    }
+    return (p && p.displayName) || "ゲスト";
+  }
+
+  async function saveHandle(nextHandle) {
+    setHandleSaving(true);
+    setHandleError("");
+    try {
+      await updateHandle(nextHandle);
+      setCurrentHandle(nextHandle);
+      setHandleInput(nextHandle);
+      setShowProfile(false);
+    } catch (e) {
+      var code = e && e.code ? String(e.code) : "";
+      if (code.indexOf("already-exists") >= 0) {
+        setHandleError("そのハンドル名は既に使われています");
+      } else if (code.indexOf("invalid-argument") >= 0) {
+        setHandleError("ハンドル名は2〜20文字で入力してください");
+      } else {
+        setHandleError("保存できませんでした。時間をおいて再度お試しください");
+      }
+    } finally {
+      setHandleSaving(false);
+    }
   }
 
   // [追加] What's Newからのアイテムクリック
@@ -722,6 +824,9 @@ export default function App() {
           {user ? (
             <div style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
               <img src={user.photoURL} alt={user.displayName} title={user.displayName} style={{ width: 24, height: 24, borderRadius: "50%", border: "1px solid #475569" }} />
+              <button onClick={function () { setHandleInput(currentHandle || user.displayName || "ゲスト"); setHandleError(""); setShowProfile(true); }} style={{ background: "transparent", color: "#93c5fd", border: "1px solid rgba(59,130,246,0.4)", padding: "3px 6px", borderRadius: 5, cursor: "pointer", fontSize: 9, fontFamily: "inherit", maxWidth: 88, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {currentHandle || user.displayName || "ゲスト"}
+              </button>
               <button onClick={logoutUser} style={{ background: "transparent", color: "#94a3b8", border: "1px solid #475569", padding: "3px 6px", borderRadius: 5, cursor: "pointer", fontSize: 9, fontFamily: "inherit" }}>退出</button>
               {isAdmin && (
                 <button onClick={function () { setShowAdmin(!showAdmin); }} style={{ background: showAdmin ? "#f59e0b" : "transparent", color: showAdmin ? "#1e293b" : "#94a3b8", border: "1px solid #475569", padding: "3px 6px", borderRadius: 5, cursor: "pointer", fontSize: 9, fontWeight: 700, fontFamily: "inherit" }}>管理</button>
@@ -832,6 +937,7 @@ export default function App() {
           monsMap={monsMap}
           onClose={function () { setShowNews(false); }}
           onItemClick={handleNewsItemClick}
+          displayNameForPhoto={displayNameForPhoto}
         />
       )}
 
@@ -902,7 +1008,19 @@ export default function App() {
       )}
 
       {showPhoto && sel && (
-        <PhotoModal mon={sel} photos={pho[sel.id] || []} onClose={function () { setShowPhoto(false); }} onAdd={addPhoto} onDel={delPhoto} user={user} />
+        <PhotoModal mon={sel} photos={pho[sel.id] || []} onClose={function () { setShowPhoto(false); }} onAdd={addPhoto} onDel={delPhoto} user={user} displayNameForPhoto={displayNameForPhoto} />
+      )}
+
+      {showProfile && user && (
+        <ProfileModal
+          currentHandle={currentHandle}
+          handleInput={handleInput}
+          setHandleInput={setHandleInput}
+          saving={handleSaving}
+          errorText={handleError}
+          onSave={saveHandle}
+          onClose={function () { if (!handleSaving) setShowProfile(false); }}
+        />
       )}
 
       {showAbout && (
