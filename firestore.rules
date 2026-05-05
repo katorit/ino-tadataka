@@ -1,0 +1,67 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isSignedIn()
+        && request.auth.token.admin == true;
+    }
+
+    function validCustomMonument() {
+      return request.resource.data.name is string
+        && request.resource.data.loc is string
+        && request.resource.data.lat is number
+        && request.resource.data.lng is number;
+    }
+
+    match /monuments/{docId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /customMonuments/{docId} {
+      allow read: if true;
+      allow create, update: if isAdmin() && validCustomMonument();
+      allow delete: if isAdmin();
+    }
+
+    match /userProfiles/{userId} {
+      allow read: if true;
+      allow create, update: if isSignedIn()
+        && request.auth.uid == userId
+        && request.resource.data.handle is string
+        && request.resource.data.handle.size() >= 2
+        && request.resource.data.handle.size() <= 20;
+      allow delete: if false;
+    }
+
+    match /handles/{normalizedHandle} {
+      allow read: if false;
+      allow write: if false;
+    }
+
+    match /visits/{userId} {
+      allow read, write: if isSignedIn() && request.auth.uid == userId;
+    }
+
+    match /photos/{docId} {
+      allow read: if true;
+      allow create: if isSignedIn()
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.monumentId is string
+        && request.resource.data.url is string
+        && request.resource.data.storagePath is string
+        && request.resource.data.date is string
+        && (!('displayName' in request.resource.data) || request.resource.data.displayName is string)
+        && (!('cmt' in request.resource.data) || request.resource.data.cmt is string)
+        && (!('dist' in request.resource.data) || request.resource.data.dist is number)
+        && (!('shotDate' in request.resource.data) || request.resource.data.shotDate is string);
+      allow update: if false;
+      allow delete: if isSignedIn()
+        && resource.data.userId == request.auth.uid;
+    }
+  }
+}
