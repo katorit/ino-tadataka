@@ -1,4 +1,5 @@
 # 伊能忠敬 記念碑巡りマップ
+公開サイト　https://ino-monument-map.web.app/
 
 伊能忠敬およびゆかりの人物に関する記念碑・史跡を地図上で巡る React + Vite + Firebase アプリです。
 
